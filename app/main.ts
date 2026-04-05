@@ -1,6 +1,14 @@
 import OpenAI from "openai";
 import * as fs from 'fs';
 
+interface Message {
+  role: string;
+  tool_call_id: string | null;
+  content: string;
+}
+
+const messages: Message[] = [];
+
 async function main() {
   const [, , flag, prompt] = process.argv;
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -18,50 +26,51 @@ async function main() {
     apiKey: apiKey,
     baseURL: baseURL,
   });
-
-  const response = await client.chat.completions.create({
-    model: "anthropic/claude-haiku-4.5",
-    messages: [{ role: "user", content: prompt }],
-    tools: [{
-      type: "function",
-      function: {
-        name: "Read",
-        description: "Read and return the contents of a file",
-        parameters: {
-          type: "object",
-          properties: {
-            file_path: {
-              type: "string",
-              description: "The path to the file to read"
-            }
-          },
-          required: ["file_path"]
+  
+  const messages: Message[] = [{role: 'user', tool_call_id: null ,content: prompt}];
+  while (true) {
+    const response = await client.chat.completions.create({
+      model: "anthropic/claude-haiku-4.5",
+      messages: messages,
+      tools: [{
+        type: "function",
+        function: {
+          name: "Read",
+          description: "Read and return the contents of a file",
+          parameters: {
+            type: "object",
+            properties: {
+              file_path: { type: "string", description: "The path to the file to read" }
+            },
+            required: ["file_path"]
+          }
+        }
+      }]
+    });
+  
+    const assMsg = response.choices[0].message;
+    messages.push(assMsg as Message);
+  
+    const tool_calls = assMsg.tool_calls;
+  
+    if (tool_calls && tool_calls.length > 0) {
+      for (const tool_call of tool_calls) {
+        const args = JSON.parse(tool_call.function.arguments);
+        
+        if (tool_call.function.name === 'Read') {
+          const file = fs.readFileSync(args.file_path, 'utf-8');
+          messages.push({
+            role: 'tool',
+            tool_call_id: tool_call.id, 
+            content: file
+          });
         }
       }
-    }]
-  });
-
-  if (!response.choices || response.choices.length === 0) {
-    throw new Error("no choices in response");
-  }
-
-
-
-  // TODO: Uncomment the lines below to pass the first stage
-  const tool_calls = response.choices[0].message.tool_calls;
-  if (tool_calls && tool_calls.length > 0) {
-    const args = JSON.parse(response.choices[0].message.tool_calls[0].function.arguments);
-    const funcName = response.choices[0].message.tool_calls[0].function.name
-    if (funcName == 'Read') {
-      const file = fs.readFileSync(args.file_path, 'utf-8')
-      console.log(file)
+    } else {
+      console.log(assMsg.content);
+      break;
     }
   }
-  else {
-    console.log(response.choices[0].message.content);
-  }
-  
-  
 }
 
 main();
