@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import * as fs from 'fs';
+import { $ } from "bun";
 
 interface Message {
   role: string;
@@ -8,6 +9,7 @@ interface Message {
 }
 
 const messages: Message[] = [];
+
 
 async function main() {
   const [, , flag, prompt] = process.argv;
@@ -66,7 +68,24 @@ async function main() {
             }
           }
         }
-      }]
+        },
+        {
+          type: "function",
+          function: {
+            name: "Bash",
+            description: "Execute a shell command",
+            parameters: {
+              type: "object",
+              required: ["command"],
+              properties: {
+                command: {
+                  type: "string",
+                  description: "The command to execute"
+                }
+              }
+            }
+          }
+        }]
     });
   
     const assMsg = response.choices[0].message;
@@ -101,6 +120,26 @@ async function main() {
               role: 'tool',
               tool_call_id: tool_call.id, 
               content: 'Content written successfully'
+            });
+          }
+        }
+        else if (tool_call.function.name === 'Bash') {
+          const command = args.command
+          const result = await $`${{ raw: command }}`.quiet();
+          if (result.stdout) {
+            console.log(result.stdout.toString())
+            messages.push({
+              role: 'tool',
+              tool_call_id: tool_call.id, 
+              content: result.stdout.toString()
+            });
+          }
+          else {
+            console.log(result.stderr)
+            messages.push({
+              role: 'tool',
+              tool_call_id: tool_call.id, 
+              content: result.stderr.toString()
             });
           }
         }
